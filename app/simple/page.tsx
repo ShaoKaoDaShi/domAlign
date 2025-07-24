@@ -2,6 +2,7 @@
 
 import React from 'react';
 import domAlign from '../../src';
+import getRegion from '../../src/getRegion';
 
 function $id(id): any {
   return document.getElementById(id);
@@ -11,7 +12,11 @@ function $val(sel) {
   sel = $id(sel);
   return sel.value;
 }
-
+const getregion = () => {
+  const elRegion = getRegion($id('source'));
+  const target = getRegion($id('target'));
+  console.log('elRegion', elRegion, target);
+};
 function align() {
   domAlign($id('source'), $id('target'), {
     points: [
@@ -100,6 +105,9 @@ export default function Simple() {
         &nbsp;
         <button id="align" onClick={align}>
           align
+        </button>
+        <button id="getregion" onClick={getregion}>
+          getregion
         </button>
         <br />
         <div
