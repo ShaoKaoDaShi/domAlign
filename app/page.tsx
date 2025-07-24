@@ -40,6 +40,9 @@ export default function Home() {
         <Link href="/simple">simple</Link>
       </p>
       <p>
+        <Link href="/scrollSync">scrollSync</Link>
+      </p>
+      <p>
         <Link href="/body-overflow">body-overflow</Link>
       </p>
       <p>
