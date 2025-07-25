@@ -43,6 +43,9 @@ export default function Home() {
         <Link href="/scrollSync">scrollSync</Link>
       </p>
       <p>
+        <Link href="/regexString">scrollSync</Link>
+      </p>
+      <p>
         <Link href="/body-overflow">body-overflow</Link>
       </p>
       <p>
