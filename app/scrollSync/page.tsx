@@ -4,9 +4,19 @@ import React, { useEffect, useState } from 'react';
 import domAlign from '../../src';
 import getRegion from '../../src/getRegion';
 import { setTransform } from '../../src/utils';
+import { compute } from 'compute-scroll-into-view';
+import scrollIntoView from 'scroll-into-view-if-needed';
+
+// const node = document.getElementById('hero');
+
+// same behavior as Element.scrollIntoView({block: "nearest", inline: "nearest"})
+// see: https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollIntoView
+
+// same behavior as Element.scrollIntoViewIfNeeded(true)
+// see: https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollIntoViewIfNeeded
 
 function $id(id): any {
-  return document.getElementById(id);
+  return document.querySelector('#' + id);
 }
 
 function $val(sel) {
@@ -22,6 +32,7 @@ const getregion = () => {
 const arr = Array(1000)
   .fill(0)
   .map((_, i) => i);
+const arr2 = [1, 4, 5, 2, 9, 10, 11, 888, 889, 890, 991, 992, 993];
 // 在文件顶部添加重叠检测函数
 function isElementsOverlapping(
   element1: HTMLElement,
@@ -120,6 +131,7 @@ function align() {
     });
   });
 }
+
 export default function Simple() {
   const [sourceItemHeight, setSourceItemHeight] = useState(400);
   const [targetItemHeight, setTargetItemHeight] = useState(200);
@@ -147,7 +159,53 @@ export default function Simple() {
       setTimeout(renderInBatches, 10);
     }
   };
+  function alignAndResolveOverlaps() {
+    let prevRect: DOMRect | null = null;
 
+    // 1. 收集元素及其目标的 top 坐标
+    const itemsWithTop = arr2
+      .map((item) => {
+        const target = $id('target' + item);
+        return {
+          item,
+          top: target ? target.getBoundingClientRect().top : Infinity,
+        };
+      })
+      .filter(({ top }) => top !== Infinity);
+
+    // 2. 按 top 坐标排序
+    itemsWithTop.sort((a, b) => a.top - b.top);
+
+    // 3. 按排序后的顺序依次对齐和避重叠
+    itemsWithTop.forEach(({ item }, idx) => {
+      const source = $id('source' + item);
+      const target = $id('target' + item);
+      if (!source || !target) return;
+
+      // 先对齐
+      domAlign(source, target, {
+        points: ['tl', 'tl'],
+        offset: [0, 0], // 先不带偏移
+        useCssTransform: true,
+      });
+
+      const currRect = source.getBoundingClientRect();
+
+      let offset = 0;
+      if (prevRect && currRect.top < prevRect.bottom) {
+        // 只在重叠时，基于上一个元素的 bottom 重新计算偏移
+        offset = prevRect.bottom - currRect.top + 10;
+        domAlign(source, target, {
+          points: ['tl', 'tl'],
+          offset: [0, offset],
+          useCssTransform: true,
+        });
+        prevRect = source.getBoundingClientRect();
+      } else {
+        prevRect = currRect;
+      }
+    });
+  }
   useEffect(() => {
     renderInBatches();
   }, []);
@@ -156,18 +214,8 @@ export default function Simple() {
     // 等待 DOM 更新后再对齐
     if (visibleItems.length < arr.length) return;
     requestAnimationFrame(() => {
-      visibleItems.forEach((item) => {
-        const source = $id('source' + item);
-        const target = $id('target' + item);
-        if (source && target) {
-          domAlign(source, target, {
-            points: ['tl', 'tl'],
-            useCssTransform: true,
-          });
-        }
-      });
       setTimeout(() => {
-        resolveOverlaps();
+        alignAndResolveOverlaps();
       });
     });
   }, [visibleItems]);
@@ -214,16 +262,10 @@ export default function Simple() {
           ))}
         </div>
         <div style={{ width: '500px', border: '1px solid green' }}>
-          {arr.map((item, index) => {
+          {arr2.map((item, index) => {
             // if (index > 2) return;
             return (
               <div
-                onClick={() => {
-                  $id('target' + item).scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'center',
-                  });
-                }}
                 key={index}
                 id={'source' + item}
                 style={{
@@ -233,6 +275,55 @@ export default function Simple() {
                   margin: '10px',
                 }}>
                 source {item}
+                <button
+                  onClick={() => {
+                    const downTarget = $id('target' + arr2[index + 1]);
+
+                    console.log(
+                      '🚀 ~ arr2[index + 1]:',
+                      arr2[index + 1],
+                      downTarget,
+                      'target' + arr2[index + 1],
+                    );
+                    // downTarget.scrollIntoView({
+                    //   behavior: 'smooth',
+                    //   block: 'center',
+                    //   inline: 'nearest',
+                    // });
+                    // downTarget.scrollIntoView({
+                    //   behavior: 'smooth',
+                    //   block: 'center',
+                    // });
+                    // const actions = compute(downTarget, {
+                    //   scrollMode: 'if-needed',
+                    //   block: 'center',
+                    //   inline: 'center',
+                    // });
+
+                    // Then perform the scrolling, use scroll-into-view-if-needed if you don't want to implement this part
+                    // actions.forEach(({ el, top, left }) => {
+                    //   el.scrollTop = top;
+                    //   el.scrollLeft = left;
+                    // });
+                    scrollIntoView(downTarget, {
+                      behavior: 'smooth',
+                      scrollMode: 'if-needed',
+                      block: 'center',
+                    });
+                  }}>
+                  down
+                </button>
+                <button
+                  onClick={() => {
+                    const upTarget = $id('target' + arr2[index - 1]);
+                    console.log('🚀 ~ arr2[index - 1]:', arr2[index - 1]);
+                    upTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'center',
+                    });
+                  }}>
+                  up
+                </button>
               </div>
             );
           })}
