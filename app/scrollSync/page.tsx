@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import domAlign from '../../src';
 import getRegion from '../../src/getRegion';
 import { setTransform } from '../../src/utils';
@@ -19,7 +19,9 @@ const getregion = () => {
   console.log('elRegion', elRegion, target);
 };
 
-const arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const arr = Array(1000)
+  .fill(0)
+  .map((_, i) => i);
 // 在文件顶部添加重叠检测函数
 function isElementsOverlapping(
   element1: HTMLElement,
@@ -98,6 +100,10 @@ function resolveOverlaps() {
 
 function align() {
   arr.forEach((item) => {
+    if ($id('source' + item) === null || $id('target' + item) === null) {
+      console.warn('Element not found for item:', item);
+      return;
+    }
     domAlign($id('source' + item), $id('target' + item), {
       points: ['tl', 'tl'],
       // offset: [$val('offset1'), $val('offset2')],
@@ -117,9 +123,57 @@ function align() {
 export default function Simple() {
   const [sourceItemHeight, setSourceItemHeight] = useState(400);
   const [targetItemHeight, setTargetItemHeight] = useState(200);
+  const [visibleItems, setVisibleItems] = useState<number[]>([]);
+  const [renderedCount, setRenderedCount] = useState(0);
+  const renderedCountRef = React.useRef(0);
+  const BATCH_SIZE = 20; // 每批渲染的项目数量
+
+  // 时间分片渲染函数
+  const renderInBatches = () => {
+    if (renderedCountRef.current >= arr.length) return;
+    // align();
+    const endIndex = Math.min(
+      renderedCountRef.current + BATCH_SIZE,
+      arr.length,
+    );
+    const newItems = arr.slice(renderedCountRef.current, endIndex);
+
+    setVisibleItems((prev) => [...prev, ...newItems]);
+    // setRenderedCount(endIndex);
+    renderedCountRef.current = endIndex;
+    console.log('endIndex', endIndex, arr.length);
+
+    if (endIndex < arr.length) {
+      setTimeout(renderInBatches, 10);
+    }
+  };
+
+  useEffect(() => {
+    renderInBatches();
+  }, []);
+
+  useEffect(() => {
+    // 等待 DOM 更新后再对齐
+    if (visibleItems.length < arr.length) return;
+    requestAnimationFrame(() => {
+      visibleItems.forEach((item) => {
+        const source = $id('source' + item);
+        const target = $id('target' + item);
+        if (source && target) {
+          domAlign(source, target, {
+            points: ['tl', 'tl'],
+            useCssTransform: true,
+          });
+        }
+      });
+      setTimeout(() => {
+        resolveOverlaps();
+      });
+    });
+  }, [visibleItems]);
 
   return (
-    <div>
+    <div style={{ height: '100vh', overflowY: 'scroll' }}>
       <div>
         <button onClick={align}>dom-align</button>
         <button onClick={resolveOverlaps}>resolveOverlaps</button>
@@ -140,7 +194,7 @@ export default function Simple() {
       </div>
       <div style={{ display: 'flex' }}>
         <div style={{ flex: 1, border: '1px solid red' }}>
-          {arr.map((item, index) => (
+          {visibleItems.map((item, index) => (
             <div
               key={index}
               id={'target' + item}
