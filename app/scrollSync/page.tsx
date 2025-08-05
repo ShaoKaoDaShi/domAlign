@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import domAlign from '../../src';
 import getRegion from '../../src/getRegion';
 import { setTransform } from '../../src/utils';
 import { compute } from 'compute-scroll-into-view';
 import scrollIntoView from 'scroll-into-view-if-needed';
+import TimeSlicingList from '../time-slicing/page';
 
 // const node = document.getElementById('hero');
 
@@ -32,6 +33,12 @@ const getregion = () => {
 const arr = Array(1000)
   .fill(0)
   .map((_, i) => i);
+const getArr = () =>
+  new Promise<number[]>((resolve) => {
+    setTimeout(() => {
+      resolve(arr);
+    }, 1000);
+  });
 const arr2 = [1, 4, 5, 2, 9, 10, 11, 888, 889, 890, 991, 992, 993];
 // 在文件顶部添加重叠检测函数
 function isElementsOverlapping(
@@ -139,6 +146,14 @@ export default function Simple() {
   const [renderedCount, setRenderedCount] = useState(0);
   const renderedCountRef = React.useRef(0);
   const BATCH_SIZE = 20; // 每批渲染的项目数量
+  const [targetData, setTargetData] = useState<number[]>([]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    getArr().then((res) => {
+      setTargetData(res);
+    });
+  }, []);
 
   // 时间分片渲染函数
   const renderInBatches = () => {
@@ -160,6 +175,7 @@ export default function Simple() {
     }
   };
   function alignAndResolveOverlaps() {
+    console.log('alignAndResolveOverlaps');
     let prevRect: DOMRect | null = null;
 
     // 1. 收集元素及其目标的 top 坐标
@@ -206,20 +222,103 @@ export default function Simple() {
       }
     });
   }
+  const bindTargetAlign = () => {
+    // 初始化Intersection Observer
+    let debounceTimer = null;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        let lastEntry: IntersectionObserverEntry | null = null;
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            lastEntry = entry;
+            // 只监听第一次进入
+            observer.unobserve(entry.target);
+          }
+        });
+        // 防抖处理：50ms内只执行最后一次
+        if (lastEntry) {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            console.log('lastEntry', lastEntry);
+            alignAndResolveOverlaps();
+          }, 50);
+        }
+      },
+      { threshold: 0 },
+    );
+
+    // 监听所有target元素
+    arr2.forEach((item) => {
+      const targetEl = $id('target' + item);
+      if (targetEl) observer.observe(targetEl);
+    });
+  };
   useEffect(() => {
     renderInBatches();
+    setTimeout(() => {
+      // alignAndResolveOverlaps();
+      // bindTargetAlign();
+    }, 3000);
+
+    // 监听页面滚动
+    const handleScroll = () => {
+      console.log('Page scrolled to:', window.scrollY);
+    };
+    const debAlignAndResolveOverlaps = debounce(alignAndResolveOverlaps, 200);
+    // 初始化ResizeObserver监听target元素大小变化
+    const resizeObserver = new ResizeObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.target === scrollContainerRef.current) {
+          debAlignAndResolveOverlaps();
+        }
+      });
+      // alignAndResolveOverlaps();
+    });
+    resizeObserver.observe(scrollContainerRef.current);
+    // 监听所有target元素
+    // arr2.forEach((item) => {
+    //   const targetEl = $id('target' + item);
+    //   if (targetEl) resizeObserver.observe(targetEl);
+    // });
+
+    window.addEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      // 清理ResizeObserver监听
+      resizeObserver.disconnect();
+    };
   }, []);
 
-  useEffect(() => {
-    // 等待 DOM 更新后再对齐
-    if (visibleItems.length < arr.length) return;
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        alignAndResolveOverlaps();
-      });
-    });
-  }, [visibleItems]);
-
+  // useEffect(() => {
+  //   // 等待 DOM 更新后再对齐
+  //   if (visibleItems.length < arr.length) return;
+  //   requestAnimationFrame(() => {
+  //     setTimeout(() => {
+  //       alignAndResolveOverlaps();
+  //     });
+  //   });
+  // }, [visibleItems]);
+  const SliceData = useMemo(() => {
+    console.log('targetData', targetData);
+    return targetData.map((item, index) => (
+      <div
+        key={index}
+        id={'target' + item}
+        onClick={() => {
+          $id('source' + item).scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+        }}
+        style={{
+          border: '1px solid red',
+          height: targetItemHeight + 'px',
+          margin: '50px 10px',
+        }}>
+        target {item}
+      </div>
+    ));
+  }, [targetData]);
   return (
     <div style={{ height: '100vh', overflowY: 'scroll' }}>
       <div>
@@ -241,8 +340,18 @@ export default function Simple() {
         </div>
       </div>
       <div style={{ display: 'flex' }}>
-        <div style={{ flex: 1, border: '1px solid red' }}>
-          {visibleItems.map((item, index) => (
+        <div
+          style={{ flex: 1, border: '1px solid red' }}
+          ref={scrollContainerRef}>
+          <TimeSlicingList
+            data={SliceData}
+            batchSize={10}
+            onComplete={() => {
+              // alignAndResolveOverlaps();
+              // console.log('alignAndResolveOverlaps');
+            }}
+          />
+          {/* {visibleItems.map((item, index) => (
             <div
               key={index}
               id={'target' + item}
@@ -259,7 +368,7 @@ export default function Simple() {
               }}>
               target {item}
             </div>
-          ))}
+          ))} */}
         </div>
         <div style={{ width: '500px', border: '1px solid green' }}>
           {arr2.map((item, index) => {
@@ -331,4 +440,14 @@ export default function Simple() {
       </div>
     </div>
   );
+}
+function debounce(alignAndResolveOverlaps: () => void, delay: number) {
+  let timeoutId: number | NodeJS.Timeout;
+  return function () {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      if (!timeoutId) return;
+      alignAndResolveOverlaps();
+    }, delay);
+  };
 }
