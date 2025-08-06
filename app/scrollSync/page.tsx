@@ -1,12 +1,23 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import domAlign from '../../src';
 import getRegion from '../../src/getRegion';
 import { setTransform } from '../../src/utils';
+import { compute } from 'compute-scroll-into-view';
+import scrollIntoView from 'scroll-into-view-if-needed';
+import TimeSlicingList from '../time-slicing/page';
+
+// const node = document.getElementById('hero');
+
+// same behavior as Element.scrollIntoView({block: "nearest", inline: "nearest"})
+// see: https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollIntoView
+
+// same behavior as Element.scrollIntoViewIfNeeded(true)
+// see: https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollIntoViewIfNeeded
 
 function $id(id): any {
-  return document.getElementById(id);
+  return document.querySelector('#' + id);
 }
 
 function $val(sel) {
@@ -19,7 +30,16 @@ const getregion = () => {
   console.log('elRegion', elRegion, target);
 };
 
-const arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const arr = Array(1000)
+  .fill(0)
+  .map((_, i) => i);
+const getArr = () =>
+  new Promise<number[]>((resolve) => {
+    setTimeout(() => {
+      resolve(arr);
+    }, 1000);
+  });
+const arr2 = [1, 4, 5, 2, 9, 10, 11, 888, 889, 890, 991, 992, 993];
 // 在文件顶部添加重叠检测函数
 function isElementsOverlapping(
   element1: HTMLElement,
@@ -98,6 +118,10 @@ function resolveOverlaps() {
 
 function align() {
   arr.forEach((item) => {
+    if ($id('source' + item) === null || $id('target' + item) === null) {
+      console.warn('Element not found for item:', item);
+      return;
+    }
     domAlign($id('source' + item), $id('target' + item), {
       points: ['tl', 'tl'],
       // offset: [$val('offset1'), $val('offset2')],
@@ -114,12 +138,189 @@ function align() {
     });
   });
 }
+
 export default function Simple() {
   const [sourceItemHeight, setSourceItemHeight] = useState(400);
   const [targetItemHeight, setTargetItemHeight] = useState(200);
+  const [visibleItems, setVisibleItems] = useState<number[]>([]);
+  const [renderedCount, setRenderedCount] = useState(0);
+  const renderedCountRef = React.useRef(0);
+  const BATCH_SIZE = 20; // 每批渲染的项目数量
+  const [targetData, setTargetData] = useState<number[]>([]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    getArr().then((res) => {
+      setTargetData(res);
+    });
+  }, []);
+
+  // 时间分片渲染函数
+  const renderInBatches = () => {
+    if (renderedCountRef.current >= arr.length) return;
+    // align();
+    const endIndex = Math.min(
+      renderedCountRef.current + BATCH_SIZE,
+      arr.length,
+    );
+    const newItems = arr.slice(renderedCountRef.current, endIndex);
+
+    setVisibleItems((prev) => [...prev, ...newItems]);
+    // setRenderedCount(endIndex);
+    renderedCountRef.current = endIndex;
+    console.log('endIndex', endIndex, arr.length);
+
+    if (endIndex < arr.length) {
+      setTimeout(renderInBatches, 10);
+    }
+  };
+  function alignAndResolveOverlaps() {
+    console.log('alignAndResolveOverlaps');
+    let prevRect: DOMRect | null = null;
+
+    // 1. 收集元素及其目标的 top 坐标
+    const itemsWithTop = arr2
+      .map((item) => {
+        const target = $id('target' + item);
+        return {
+          item,
+          top: target ? target.getBoundingClientRect().top : Infinity,
+        };
+      })
+      .filter(({ top }) => top !== Infinity);
+
+    // 2. 按 top 坐标排序
+    itemsWithTop.sort((a, b) => a.top - b.top);
+
+    // 3. 按排序后的顺序依次对齐和避重叠
+    itemsWithTop.forEach(({ item }, idx) => {
+      const source = $id('source' + item);
+      const target = $id('target' + item);
+      if (!source || !target) return;
+
+      // 先对齐
+      domAlign(source, target, {
+        points: ['tl', 'tl'],
+        offset: [0, 0], // 先不带偏移
+        useCssTransform: true,
+      });
+
+      const currRect = source.getBoundingClientRect();
+
+      let offset = 0;
+      if (prevRect && currRect.top < prevRect.bottom) {
+        // 只在重叠时，基于上一个元素的 bottom 重新计算偏移
+        offset = prevRect.bottom - currRect.top + 10;
+        domAlign(source, target, {
+          points: ['tl', 'tl'],
+          offset: [0, offset],
+          useCssTransform: true,
+        });
+        prevRect = source.getBoundingClientRect();
+      } else {
+        prevRect = currRect;
+      }
+    });
+  }
+  const bindTargetAlign = () => {
+    // 初始化Intersection Observer
+    let debounceTimer = null;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        let lastEntry: IntersectionObserverEntry | null = null;
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            lastEntry = entry;
+            // 只监听第一次进入
+            observer.unobserve(entry.target);
+          }
+        });
+        // 防抖处理：50ms内只执行最后一次
+        if (lastEntry) {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            console.log('lastEntry', lastEntry);
+            alignAndResolveOverlaps();
+          }, 50);
+        }
+      },
+      { threshold: 0 },
+    );
+
+    // 监听所有target元素
+    arr2.forEach((item) => {
+      const targetEl = $id('target' + item);
+      if (targetEl) observer.observe(targetEl);
+    });
+  };
+  useEffect(() => {
+    renderInBatches();
+    setTimeout(() => {
+      // alignAndResolveOverlaps();
+      // bindTargetAlign();
+    }, 3000);
+
+    // 监听页面滚动
+    const handleScroll = () => {
+      console.log('Page scrolled to:', window.scrollY);
+    };
+    const debAlignAndResolveOverlaps = debounce(alignAndResolveOverlaps, 200);
+    // 初始化ResizeObserver监听target元素大小变化
+    const resizeObserver = new ResizeObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.target === scrollContainerRef.current) {
+          debAlignAndResolveOverlaps();
+        }
+      });
+      // alignAndResolveOverlaps();
+    });
+    resizeObserver.observe(scrollContainerRef.current);
+    // 监听所有target元素
+    // arr2.forEach((item) => {
+    //   const targetEl = $id('target' + item);
+    //   if (targetEl) resizeObserver.observe(targetEl);
+    // });
+
+    window.addEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      // 清理ResizeObserver监听
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  // useEffect(() => {
+  //   // 等待 DOM 更新后再对齐
+  //   if (visibleItems.length < arr.length) return;
+  //   requestAnimationFrame(() => {
+  //     setTimeout(() => {
+  //       alignAndResolveOverlaps();
+  //     });
+  //   });
+  // }, [visibleItems]);
+  const SliceData = useMemo(() => {
+    console.log('targetData', targetData);
+    return targetData.map((item, index) => (
+      <div
+        key={index}
+        id={'target' + item}
+        onClick={() => {
+          $id('source' + item).scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+        }}
+        style={{
+          border: '1px solid red',
+          height: targetItemHeight + 'px',
+          margin: '50px 10px',
+        }}>
+        target {item}
+      </div>
+    ));
+  }, [targetData]);
   return (
-    <div>
+    <div style={{ height: '100vh', overflowY: 'scroll' }}>
       <div>
         <button onClick={align}>dom-align</button>
         <button onClick={resolveOverlaps}>resolveOverlaps</button>
@@ -139,8 +340,18 @@ export default function Simple() {
         </div>
       </div>
       <div style={{ display: 'flex' }}>
-        <div style={{ flex: 1, border: '1px solid red' }}>
-          {arr.map((item, index) => (
+        <div
+          style={{ flex: 1, border: '1px solid red' }}
+          ref={scrollContainerRef}>
+          <TimeSlicingList
+            data={SliceData}
+            batchSize={10}
+            onComplete={() => {
+              // alignAndResolveOverlaps();
+              // console.log('alignAndResolveOverlaps');
+            }}
+          />
+          {/* {visibleItems.map((item, index) => (
             <div
               key={index}
               id={'target' + item}
@@ -157,19 +368,13 @@ export default function Simple() {
               }}>
               target {item}
             </div>
-          ))}
+          ))} */}
         </div>
         <div style={{ width: '500px', border: '1px solid green' }}>
-          {arr.map((item, index) => {
+          {arr2.map((item, index) => {
             // if (index > 2) return;
             return (
               <div
-                onClick={() => {
-                  $id('target' + item).scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'center',
-                  });
-                }}
                 key={index}
                 id={'source' + item}
                 style={{
@@ -179,6 +384,55 @@ export default function Simple() {
                   margin: '10px',
                 }}>
                 source {item}
+                <button
+                  onClick={() => {
+                    const downTarget = $id('target' + arr2[index + 1]);
+
+                    console.log(
+                      '🚀 ~ arr2[index + 1]:',
+                      arr2[index + 1],
+                      downTarget,
+                      'target' + arr2[index + 1],
+                    );
+                    // downTarget.scrollIntoView({
+                    //   behavior: 'smooth',
+                    //   block: 'center',
+                    //   inline: 'nearest',
+                    // });
+                    // downTarget.scrollIntoView({
+                    //   behavior: 'smooth',
+                    //   block: 'center',
+                    // });
+                    // const actions = compute(downTarget, {
+                    //   scrollMode: 'if-needed',
+                    //   block: 'center',
+                    //   inline: 'center',
+                    // });
+
+                    // Then perform the scrolling, use scroll-into-view-if-needed if you don't want to implement this part
+                    // actions.forEach(({ el, top, left }) => {
+                    //   el.scrollTop = top;
+                    //   el.scrollLeft = left;
+                    // });
+                    scrollIntoView(downTarget, {
+                      behavior: 'smooth',
+                      scrollMode: 'if-needed',
+                      block: 'center',
+                    });
+                  }}>
+                  down
+                </button>
+                <button
+                  onClick={() => {
+                    const upTarget = $id('target' + arr2[index - 1]);
+                    console.log('🚀 ~ arr2[index - 1]:', arr2[index - 1]);
+                    upTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'center',
+                    });
+                  }}>
+                  up
+                </button>
               </div>
             );
           })}
@@ -186,4 +440,14 @@ export default function Simple() {
       </div>
     </div>
   );
+}
+function debounce(alignAndResolveOverlaps: () => void, delay: number) {
+  let timeoutId: number | NodeJS.Timeout;
+  return function () {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      if (!timeoutId) return;
+      alignAndResolveOverlaps();
+    }, delay);
+  };
 }
